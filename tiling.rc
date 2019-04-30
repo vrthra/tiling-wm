@@ -1,0 +1,100 @@
+#!/bin/rc
+# Usage:
+# First save the current windows
+# ./tile.rc save >saved.s
+# Next switch to tall
+# ./tile.rc tall |tee tall.s |rc
+# Can go back if you want
+# cat saved.s |rc
+
+# get the position from the image input
+fn winpos {
+      dd -bs 1 -skip 20 -count 40 -quiet 1
+}
+# get just width and height
+fn winsize {
+   winpos | awk '{print ($3-$1),($4-$2)}'
+}
+# of the screen
+fn screen {
+   cat /mnt/wsys/screen | winsize
+}
+# get the width of the current windo. We use this
+# for wall - where the width of current window
+# is kept unchanged.
+fn getwidth {
+  w=`{cat /mnt/wsys/window | winsize}
+  echo $w(1)
+}
+# generate a move command for the input
+# move -r minx miny maxx maxy does not seem
+# to work. (see save cmd). So until then
+fn movcmd {
+  mx=`{echo $2 $4 + p|dc}
+  my=`{echo $3 $5 + p|dc}
+  echo (echo resize -r $2 $3 $mx $my '>' $1/wctl)
+}
+# print the commands to get the windows back to
+# the original positions. This does not seem to
+# work always. (can use wloc too.)
+fn savewin {
+  windows=/dev/wsys/*
+  for (i in $windows) {
+     loc=`{cat $i/window | winpos}
+     echo (echo resize -r $loc '>' $i/wctl)
+  }
+}
+# Tall configuration, with a main window, on one
+# half of the screen, and child windows on the other
+# the main window is the window from which command is
+# invoked
+fn tall {
+  maxx=$1
+  maxy=$2
+  mywin=$3
+  windows=/dev/wsys/*
+  childht=`{echo $maxy $#windows 1 - / p| dc}
+  ylast=0
+  xhalf=`{getwidth}
+  halfx=`{echo $maxx $xhalf - p| dc}
+  for (i in $windows) {
+    switch ($i) {
+        case /dev/wsys/$mywin
+          movcmd $i 0 0 $xhalf $maxy 
+        case *
+          movcmd $i $xhalf $ylast $halfx $childht
+          ylast=`{echo $ylast $childht + p| dc}
+    }
+  }
+}
+# Rows configuration
+fn rows {
+  maxx=$1
+  maxy=$2
+  windows=/dev/wsys/*
+  childht=`{echo $maxy $#windows / p| dc}
+  ylast=0
+  for (i in $windows) {
+    movcmd $i 0 $ylast $maxx $childht
+    ylast=`{echo $ylast $childht + p| dc}
+  }
+}
+
+fn main {
+  myscreen=`{screen}
+  mywin=`{cat /mnt/wsys/winid}
+  switch ($1) {
+    case rows
+      rows $myscreen $mywin
+    case tall
+      tall $myscreen $mywin
+    case save
+      savewin
+    case *
+      echo (supported: tall rows save)
+  }
+  # For some reason, this line does not
+  # really get the original window focus.
+  echo (echo current '>' /dev/wsys/$mywin/wctl)
+}
+main $*
